@@ -252,7 +252,7 @@ def generate_and_apply_nft_rules():
         if os.path.exists(NFT_RULES_FILE): os.remove(NFT_RULES_FILE)
         run_command(['systemctl', 'reload', 'nftables']); return
     
-    # This logic is a placeholder and will need to be made much smarter.
+    # This logic is a placeholder and will be improved.
     client_ip_in_tunnel = "10.0.0.2" # Placeholder
 
     rules = [f"table inet {NFT_NAT_TABLE_NAME} {{", "\tchain prerouting { type nat hook prerouting priority dstnat; policy accept; }", "}"]
