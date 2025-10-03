@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -11,63 +12,86 @@ import (
 	"time"
 )
 
-// --- Configuration for Google Handshake (placeholders) ---
-const projectID = "YOUR_PROJECT_ID" // <-- REMEMBER TO REPLACE THIS
-const topicID = "chimera-rendezvous"
+// Config struct defines the structure for our JSON configuration file.
+type Config struct {
+	HandshakeMethod string `json:"handshake_method"`
+	ListenAddress   string `json:"listen_address,omitempty"`  // Used by the server
+	ConnectAddress  string `json:"connect_address,omitempty"` // Used by the client
+	ProjectID       string `json:"project_id,omitempty"`      // For Google handshake
+	TopicID         string `json:"topic_id,omitempty"`        // For Google handshake
+}
 
 func main() {
-	// --- Command-Line Flags ---
-	handshakeMethod := flag.String("handshake", "static", "Handshake method: 'static' or 'google'")
-	listenMode := flag.Bool("listen", false, "Run in server/listen mode")
-	connectAddr := flag.String("connect", "", "Address for handshake/connection (e.g., '1.2.3.4:8080')")
+	// The program now takes a single, required argument: the path to its config file.
+	configPath := flag.String("config", "", "Path to the JSON configuration file")
 	flag.Parse()
+
+	if *configPath == "" {
+		log.Fatal("Error: -config flag is required. Please provide the path to a config file.")
+	}
+
+	// Load the configuration from the specified JSON file.
+	config, err := loadConfig(*configPath)
+	if err != nil {
+		log.Fatalf("Error loading configuration from %s: %v", *configPath, err)
+	}
 
 	var sessionKey *[KeySize]byte
 	var remoteAddr *net.UDPAddr
-	var err error
 
-	// --- Main Logic: Perform Handshake and Start Tunnel ---
-	if *listenMode {
+	// --- Main Logic: Now driven by the contents of the config file ---
+	if config.ListenAddress != "" {
 		// SERVER/LISTENER MODE
 		fmt.Println("Starting Chimera in LISTEN mode...")
-		if *handshakeMethod == "google" {
+		if config.HandshakeMethod == "google" {
 			var remoteAddrStr string
-			sessionKey, remoteAddrStr, err = performGoogleHandshakeServer(projectID, topicID)
+			sessionKey, remoteAddrStr, err = performGoogleHandshakeServer(config.ProjectID, config.TopicID)
 			if err == nil {
 				remoteAddr, err = net.ResolveUDPAddr("udp", remoteAddrStr)
 			}
-		} else {
-			sessionKey, remoteAddr, err = performStaticHandshakeServer(*connectAddr)
+		} else { // Default to static
+			sessionKey, remoteAddr, err = performStaticHandshakeServer(config.ListenAddress)
 		}
 		if err != nil {
 			log.Fatalf("Handshake failed: %v", err)
 		}
 		fmt.Println("? Handshake successful! Starting data transport listener...")
-		// Pass the original listen address AND the expected client address
-		listenForData(sessionKey, *connectAddr, remoteAddr)
+		listenForData(sessionKey, config.ListenAddress, remoteAddr)
 
-	} else if *connectAddr != "" {
+	} else if config.ConnectAddress != "" {
 		// CLIENT/CONNECT MODE
 		fmt.Println("Starting Chimera in CONNECT mode...")
-		var remoteAddrStr string
-		if *handshakeMethod == "google" {
-			sessionKey, err = performGoogleHandshakeClient(projectID, topicID, *connectAddr)
-			remoteAddrStr = *connectAddr
-		} else {
-			sessionKey, err = performStaticHandshakeClient(*connectAddr)
-			remoteAddrStr = *connectAddr
+		if config.HandshakeMethod == "google" {
+			sessionKey, err = performGoogleHandshakeClient(config.ProjectID, config.TopicID, config.ConnectAddress)
+		} else { // Default to static
+			sessionKey, err = performStaticHandshakeClient(config.ConnectAddress)
 		}
 		if err != nil {
 			log.Fatalf("Handshake failed: %v", err)
 		}
 		fmt.Println("? Handshake successful! Ready to send data.")
-		runClientDataLoop(sessionKey, remoteAddrStr)
+		runClientDataLoop(sessionKey, config.ConnectAddress)
 
 	} else {
-		fmt.Println("Usage: go run . -listen -connect <ip:port> OR go run . -connect <ip:port>")
-		flag.PrintDefaults()
+		log.Fatal("Invalid configuration: JSON file must specify either 'listen_address' or 'connect_address'")
 	}
-} // <-- THIS BRACE WAS IN THE WRONG PLACE
+}
+
+// loadConfig reads and parses the JSON configuration file.
+func loadConfig(path string) (*Config, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var config Config
+	decoder := json.NewDecoder(file)
+	if err := decoder.Decode(&config); err != nil {
+		return nil, err
+	}
+	return &config, nil
+}
 
 // listenForData is the server's main loop after a successful handshake.
 func listenForData(sessionKey *[KeySize]byte, listenAddrStr string, expectedRemoteAddr *net.UDPAddr) {
