@@ -134,54 +134,24 @@ def setup_relay_server():
 def generate_client_config():
     clear_screen(); print(f"{C.HEADER}--- Generate a Client Configuration ---{C.END}")
     print("This will generate a one-line command to set up a client that connects to THIS relay.")
+    
     relay_ip = input("Enter the public IP address of THIS relay server: ").strip()
     relay_port = input("Enter the public port of THIS relay server (e.g., 8080): ").strip()
-    config = { "handshake_method": "static", "connect_address": f"{relay_ip}:{relay_port}" }
-    config_str_escaped = json.dumps(config).replace('"', '\\"')
-    client_config_path = os.path.join(CHIMERA_CONFIG_DIR, 'client.json')
-    script_content = f"""#!/bin/bash
-set -e
-echo '[INFO] Detecting architecture...'
-ARCH=$(uname -m)
-BINARY_NAME=""
-if [ "$ARCH" = "x86_64" ]; then
-    BINARY_NAME="chimera-amd64"
-elif [ "$ARCH" = "aarch64" ]; then
-    BINARY_NAME="chimera-arm64"
-else
-    echo "[ERROR] Unsupported architecture: $ARCH"
-    exit 1
-fi
-echo "[INFO] Detected $ARCH. Using binary: $BINARY_NAME"
-BINARY_URL="{RELEASE_BASE_URL}/$BINARY_NAME"
-echo '[INFO] Installing Chimera...'
-curl -L -o {CHIMERA_BINARY_PATH} "$BINARY_URL"
-chmod +x {CHIMERA_BINARY_PATH}
-echo '[INFO] Creating configuration...'
-mkdir -p {CHIMERA_CONFIG_DIR}
-echo '{config_str_escaped}' > {client_config_path}
-echo '[INFO] Creating systemd service...'
-cat <<EOF > /etc/systemd/system/chimera-client.service
-[Unit]
-Description=Chimera Client Tunnel
-After=network.target
-[Service]
-ExecStart={CHIMERA_BINARY_PATH} -config {client_config_path}
-Restart=always
-User=root
-[Install]
-WantedBy=multi-user.target
-EOF
-echo '[INFO] Starting service...'
-systemctl daemon-reload
-systemctl enable chimera-client.service
-systemctl restart chimera-client.service
-echo '[SUCCESS] Chimera client setup is complete\\!'
-"""
-    one_line_command = f"sudo bash -c '{script_content.strip()}'"
+    
+    config_json = json.dumps({
+        "handshake_method": "static",
+        "connect_address": f"{relay_ip}:{relay_port}"
+    })
+
+    # The URL to the new installer script in your repo
+    installer_url = "https://raw.githubusercontent.com/Nima786/chimera-tunnel/main/install-client.sh"
+
+    # The new, simple, and robust one-line command
+    one_line_command = f"curl -fsSL \"{installer_url}\" | sudo bash -s -- '{config_json}'"
+    
     clear_screen()
     print(f"{C.BOLD}{C.YELLOW}--- ACTION REQUIRED on the Client Server ---{C.END}")
-    print("Run the following single command on the client server to install and start the tunnel:")
+    print("Run the following single, reliable command on the client server:")
     print(f"\n{C.CYAN}{one_line_command}{C.END}\n")
 
 def manage_forwarding_rules():
