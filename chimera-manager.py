@@ -256,15 +256,6 @@ def remove_forwarding_rule():
             print(f"\n{C.GREEN}Rule for '{name_to_remove}' removed.{C.END}")
     except (ValueError, IndexError): print(f"{C.RED}Invalid selection.{C.END}")
 
-def load_tunnels():
-    try:
-        with open(TUNNELS_DB_FILE, 'r') as f: return json.load(f)
-    except (json.JSONDecodeError, FileNotFoundError): return {}
-
-def save_tunnels(tunnels):
-    os.makedirs(CHIMERA_CONFIG_DIR, exist_ok=True)
-    with open(TUNNELS_DB_FILE, 'w') as f: json.dump(tunnels, f, indent=4)
-
 def generate_and_apply_nft_rules():
     if not check_and_fix_nftables_config(): return
     tunnels = load_tunnels()
