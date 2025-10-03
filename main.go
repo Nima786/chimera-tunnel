@@ -5,101 +5,138 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"time"
 )
 
 func main() {
-	// --- Command-Line Flags ---
-	// We use flags to tell our program whether to run as a "listen" (server)
-	// or "connect" (client).
 	listenMode := flag.Bool("listen", false, "Run in server/listen mode")
 	connectAddr := flag.String("connect", "", "Address to connect to (e.g., '127.0.0.1:8080')")
 	flag.Parse()
 
-	// --- Shared Secret Key ---
-	// For this milestone, we will use a simple, hard-coded key.
-	// In the next milestone, we will generate this dynamically.
-	// IMPORTANT: This is just a placeholder key for testing!
-	var key [KeySize]byte
-	// We fill the key with a placeholder value. A real key would be random.
-	for i := 0; i < KeySize; i++ {
-		key[i] = byte(i)
-	}
-
-	// --- Main Logic ---
 	if *listenMode {
-		// If the -listen flag is used, run the server logic.
-		runServer(&key)
+		runServer()
 	} else if *connectAddr != "" {
-		// If the -connect flag is used, run the client logic.
-		runClient(&key, *connectAddr)
+		runClient(*connectAddr)
 	} else {
-		// If no flags are given, print usage instructions.
 		fmt.Println("Usage: go run . -listen OR go run . -connect <ip:port>")
 		flag.PrintDefaults()
 	}
 }
 
-// runServer contains the logic for the listener.
-func runServer(key *[KeySize]byte) {
+func runServer() {
 	addr := "127.0.0.1:8080"
-	fmt.Printf("🚀 Starting Chimera server and listening on %s...\n", addr)
+	fmt.Printf("?? Starting Chimera server in listen mode on %s...\n", addr)
 
-	// Listen for incoming UDP packets on our address.
 	conn, err := net.ListenPacket("udp", addr)
 	if err != nil {
 		log.Fatalf("Failed to listen: %v", err)
 	}
 	defer conn.Close()
 
-	// Create a buffer to hold incoming data.
 	buffer := make([]byte, 2048)
 
+	// --- Server Handshake Logic ---
+	fmt.Println("Waiting for a client handshake...")
+
+	// 1. Wait for the client's public key.
+	n, remoteAddr, err := conn.ReadFrom(buffer)
+	if err != nil {
+		log.Fatalf("Handshake read failed: %v", err)
+	}
+	if n != handshakeKeySize {
+		log.Fatalf("Invalid handshake from %s: incorrect key size", remoteAddr)
+	}
+	var clientPubKey [handshakeKeySize]byte
+	copy(clientPubKey[:], buffer[:n])
+	fmt.Printf("Received handshake from %s\n", remoteAddr)
+
+	// 2. Generate our own key pair.
+	serverPubKey, serverPrivKey, err := GenerateKeys()
+	if err != nil {
+		log.Fatalf("Failed to generate server keys: %v", err)
+	}
+
+	// 3. Send our public key back to the client.
+	if _, err := conn.WriteTo(serverPubKey[:], remoteAddr); err != nil {
+		log.Fatalf("Failed to send handshake reply: %v", err)
+	}
+	fmt.Println("Sent handshake reply.")
+
+	// 4. Calculate the shared secret session key.
+	sessionKey, err := CalculateSharedSecret(serverPrivKey, &clientPubKey)
+	if err != nil {
+		log.Fatalf("Failed to calculate shared secret: %v", err)
+	}
+	fmt.Println("? Secure session established!")
+
+	// --- Listen for Encrypted Data ---
 	for {
-		// Wait for and read a packet from the network.
-		n, remoteAddr, err := conn.ReadFrom(buffer)
+		n, _, err := conn.ReadFrom(buffer)
 		if err != nil {
-			log.Printf("Error reading from connection: %v", err)
+			log.Printf("Error reading data: %v", err)
 			continue
 		}
-
-		fmt.Printf("\nReceived %d encrypted bytes from %s\n", n, remoteAddr)
-
-		// Decrypt the message using our protocol function.
-		decrypted, err := Decrypt(key, buffer[:n])
+		decrypted, err := Decrypt(sessionKey, buffer[:n])
 		if err != nil {
 			log.Printf("Decryption failed: %v", err)
 			continue
 		}
-
-		fmt.Printf("✅ Decrypted message: \"%s\"\n", string(decrypted))
+		fmt.Printf("Received message: \"%s\"\n", string(decrypted))
 	}
 }
 
-// runClient contains the logic for the initiator.
-func runClient(key *[KeySize]byte, connectAddr string) {
-	fmt.Printf("🚀 Starting Chimera client, connecting to %s...\n", connectAddr)
+func runClient(connectAddr string) {
+	fmt.Printf("?? Starting Chimera client, connecting to %s...\n", connectAddr)
 
-	// Dial the server. This doesn't create a persistent connection for UDP,
-	// but it sets up the destination address.
 	conn, err := net.Dial("udp", connectAddr)
 	if err != nil {
 		log.Fatalf("Failed to connect: %v", err)
 	}
 	defer conn.Close()
 
-	message := []byte("Hello from the Chimera client!")
+	// --- Client Handshake Logic ---
+	// 1. Generate our key pair.
+	clientPubKey, clientPrivKey, err := GenerateKeys()
+	if err != nil {
+		log.Fatalf("Failed to generate client keys: %v", err)
+	}
 
-	// Encrypt the message using our protocol function.
-	encrypted, err := Encrypt(key, message)
+	// 2. Send our public key to the server to initiate the handshake.
+	if _, err := conn.Write(clientPubKey[:]); err != nil {
+		log.Fatalf("Failed to send handshake: %v", err)
+	}
+	fmt.Println("Sent handshake, waiting for reply...")
+
+	// 3. Wait for the server's public key.
+	buffer := make([]byte, 2048)
+	// Set a deadline so we don't wait forever if the server is down.
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	n, err := conn.Read(buffer)
+	if err != nil {
+		log.Fatalf("Failed to receive handshake reply: %v", err)
+	}
+	if n != handshakeKeySize {
+		log.Fatalf("Invalid handshake reply: incorrect key size")
+	}
+	var serverPubKey [handshakeKeySize]byte
+	copy(serverPubKey[:], buffer[:n])
+
+	// 4. Calculate the shared secret session key.
+	sessionKey, err := CalculateSharedSecret(clientPrivKey, &serverPubKey)
+	if err != nil {
+		log.Fatalf("Failed to calculate shared secret: %v", err)
+	}
+	fmt.Println("? Secure session established!")
+
+	// --- Send Encrypted Data ---
+	message := []byte("This message is protected by a dynamic session key!")
+	encrypted, err := Encrypt(sessionKey, message)
 	if err != nil {
 		log.Fatalf("Encryption failed: %v", err)
 	}
 
-	// Send the encrypted message to the server.
-	_, err = conn.Write(encrypted)
-	if err != nil {
+	if _, err := conn.Write(encrypted); err != nil {
 		log.Fatalf("Failed to send message: %v", err)
 	}
-
-	fmt.Printf("✅ Sent encrypted message!\n")
+	fmt.Println("Sent encrypted message.")
 }
