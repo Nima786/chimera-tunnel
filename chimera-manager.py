@@ -8,7 +8,7 @@ import time
 import re
 
 # --- Configuration ---
-SCRIPT_VERSION = "v1.4-final"
+SCRIPT_VERSION = "v1.5-final"
 INSTALL_PATH = '/usr/local/bin/chimera-manager'
 CHIMERA_BINARY_PATH = '/usr/local/bin/chimera'
 CHIMERA_CONFIG_DIR = '/etc/chimera'
@@ -134,7 +134,6 @@ def setup_relay_server():
 def generate_client_config():
     clear_screen(); print(f"{C.HEADER}--- Generate a Client Configuration ---{C.END}")
     print("This will generate a one-line command to set up a client that connects to THIS relay.")
-    
     relay_ip = input("Enter the public IP address of THIS relay server: ").strip()
     relay_port = input("Enter the public port of THIS relay server (e.g., 8080): ").strip()
     
@@ -143,7 +142,6 @@ def generate_client_config():
         "connect_address": f"{relay_ip}:{relay_port}"
     })
 
-    # The URL to the new installer script in your repo
     installer_url = "https://raw.githubusercontent.com/Nima786/chimera-tunnel/main/install-client.sh"
 
     # The new, simple, and robust one-line command
