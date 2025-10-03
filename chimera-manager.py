@@ -8,15 +8,17 @@ import time
 import re
 
 # --- Configuration ---
-SCRIPT_VERSION = "v1.2-manager"
+SCRIPT_VERSION = "v1.3-manager"
 INSTALL_PATH = '/usr/local/bin/chimera-manager'
 CHIMERA_BINARY_PATH = '/usr/local/bin/chimera'
 CHIMERA_CONFIG_DIR = '/etc/chimera'
+TUNNELS_DB_FILE = os.path.join(CHIMERA_CONFIG_DIR, 'tunnels.json')
 NFT_RULES_FILE = '/etc/nftables.d/chimera-nat.nft'
 NFT_NAT_TABLE_NAME = 'chimera_nat'
 MAIN_NFT_CONFIG = '/etc/nftables.conf'
 SCRIPT_URL = "https://raw.githubusercontent.com/Nima786/chimera-tunnel/main/chimera-manager.py"
-BINARY_URL = "https://github.com/Nima786/chimera-tunnel/releases/download/v0.1.0/chimera"
+# --- UPDATED: Point to the new v0.2.0 release ---
+BINARY_URL = "https://github.com/Nima786/chimera-tunnel/releases/download/v0.2.0/chimera"
 
 # --- Color Codes ---
 class C:
@@ -46,7 +48,6 @@ def check_and_fix_nftables_config():
             print(f"{C.RED}FATAL ERROR: Failed to write to '{MAIN_NFT_CONFIG}'.{C.END}"); return False
     return True
 
-# --- NEW: Port Parsing and Conflict Checking ---
 def parse_and_check_ports(ports_str):
     requested_ports = set()
     try:
@@ -62,21 +63,16 @@ def parse_and_check_ports(ports_str):
                 requested_ports.add(port)
     except ValueError:
         return None, f"Invalid format in '{ports_str}'"
-
-    # Check for conflicts
     used_ports = set()
-    for proto_flag in ['-tlnp', '-ulnp']: # Check both TCP and UDP
+    for proto_flag in ['-tlnp', '-ulnp']:
         result = run_command(['ss', proto_flag], capture=True)
         if result:
             for line in result.stdout.splitlines()[1:]:
                 match = re.search(r':(\d+)\s', line)
                 if match: used_ports.add(int(match.group(1)))
-    
     conflicts = requested_ports.intersection(used_ports)
     if conflicts:
         return None, f"Port(s) already in use: {', '.join(map(str, sorted(conflicts)))}"
-    
-    # Return the formatted string for nftables
     return ", ".join(ports_str.split(',')), None
 
 # --- Core Functions ---
@@ -109,25 +105,21 @@ def install():
 
 def setup_relay_server():
     clear_screen(); print(f"{C.HEADER}--- Setup This Server as a Public Relay ---{C.END}")
-    if os.path.exists(os.path.join(CHIMERA_CONFIG_DIR, 'server.json')):
+    config_path = os.path.join(CHIMERA_CONFIG_DIR, 'server.json')
+    if os.path.exists(config_path):
         if input(f"{C.YELLOW}A relay configuration already exists. Overwrite? (y/N): {C.END}").lower().strip() != 'y': return
     
     print("Select the handshake method this relay will use:")
     print(f"  {C.CYAN}1. Static{C.END} (Simple, requires a public port for handshake)")
-    print(f"  {C.CYAN}2. Google Cloud{C.END} (Stealthy, not yet implemented)")
     choice = input("Enter choice: ").strip()
 
     if choice == '1':
         listen_ip = input("Enter the IP address for the relay to listen on (e.g., 0.0.0.0 for all): ").strip() or "0.0.0.0"
         listen_port = input("Enter the port for the relay to listen on (e.g., 8080): ").strip()
-        config = {
-            "handshake_method": "static",
-            "listen_address": f"{listen_ip}:{listen_port}"
-        }
+        config = { "handshake_method": "static", "listen_address": f"{listen_ip}:{listen_port}" }
         
         os.makedirs(CHIMERA_CONFIG_DIR, exist_ok=True)
-        with open(os.path.join(CHIMERA_CONFIG_DIR, 'server.json'), 'w') as f:
-            json.dump(config, f, indent=4)
+        with open(config_path, 'w') as f: json.dump(config, f, indent=4)
             
         service_content = f"""
 [Unit]
@@ -135,7 +127,7 @@ Description=Chimera Relay Server
 After=network.target
 
 [Service]
-ExecStart={CHIMERA_BINARY_PATH} -listen -connect {config['listen_address']}
+ExecStart={CHIMERA_BINARY_PATH} -config {config_path}
 Restart=always
 User=root
 
@@ -146,7 +138,7 @@ WantedBy=multi-user.target
         run_command(['systemctl', 'daemon-reload']); run_command(['systemctl', 'enable', 'chimera-relay.service']); run_command(['systemctl', 'restart', 'chimera-relay.service'])
         print(f"{C.GREEN}Relay server configured and started successfully!{C.END}")
     else:
-        print(f"{C.RED}Invalid or unimplemented choice.{C.END}")
+        print(f"{C.RED}Invalid choice.{C.END}")
 
 def generate_client_config():
     clear_screen(); print(f"{C.HEADER}--- Generate a Client Configuration ---{C.END}")
@@ -155,23 +147,19 @@ def generate_client_config():
     relay_ip = input("Enter the public IP address of THIS relay server: ").strip()
     relay_port = input("Enter the public port of THIS relay server (e.g., 8080): ").strip()
     
-    config = {
-        "handshake_method": "static",
-        "connect_address": f"{relay_ip}:{relay_port}"
-    }
-    
-    # We will embed the config and service setup in a bash command for a one-liner
+    config = { "handshake_method": "static", "connect_address": f"{relay_ip}:{relay_port}" }
     config_str = json.dumps(config)
+    client_config_path = os.path.join(CHIMERA_CONFIG_DIR, 'client.json')
     
     setup_command = f"""
 bash -c "
 echo '[INFO] Installing Chimera...'
-curl -L -o /usr/local/bin/chimera {BINARY_URL}
-chmod +x /usr/local/bin/chimera
+curl -L -o {CHIMERA_BINARY_PATH} {BINARY_URL}
+chmod +x {CHIMERA_BINARY_PATH}
 
 echo '[INFO] Creating configuration...'
 mkdir -p {CHIMERA_CONFIG_DIR}
-echo '{config_str}' > {os.path.join(CHIMERA_CONFIG_DIR, 'client.json')}
+echo '{config_str}' > {client_config_path}
 
 echo '[INFO] Creating systemd service...'
 cat <<EOF > /etc/systemd/system/chimera-client.service
@@ -180,7 +168,7 @@ Description=Chimera Client Tunnel
 After=network.target
 
 [Service]
-ExecStart={CHIMERA_BINARY_PATH} -connect {config['connect_address']}
+ExecStart={CHIMERA_BINARY_PATH} -config {client_config_path}
 Restart=always
 User=root
 
@@ -226,9 +214,7 @@ def add_forwarding_rule():
     dest_ip = input(f"Enter the final destination IP on the client server (e.g., 127.0.0.1): ").strip() or "127.0.0.1"
     dest_port = input(f"Enter the final destination port on the client server (e.g., 80): ").strip()
 
-    # For now, we'll just use the public port as the name.
-    name = formatted_ports
-    
+    name = formatted_ports # Use the port string as a unique key
     tunnels = load_tunnels()
     tunnels[name] = {'public_ports': formatted_ports, 'dest_ip': dest_ip, 'dest_port': dest_port}
     save_tunnels(tunnels)
@@ -256,6 +242,15 @@ def remove_forwarding_rule():
             print(f"\n{C.GREEN}Rule for '{name_to_remove}' removed.{C.END}")
     except (ValueError, IndexError): print(f"{C.RED}Invalid selection.{C.END}")
 
+def load_tunnels():
+    try:
+        with open(TUNNELS_DB_FILE, 'r') as f: return json.load(f)
+    except (json.JSONDecodeError, FileNotFoundError): return {}
+
+def save_tunnels(tunnels):
+    os.makedirs(CHIMERA_CONFIG_DIR, exist_ok=True)
+    with open(TUNNELS_DB_FILE, 'w') as f: json.dump(tunnels, f, indent=4)
+
 def generate_and_apply_nft_rules():
     if not check_and_fix_nftables_config(): return
     tunnels = load_tunnels()
@@ -263,17 +258,10 @@ def generate_and_apply_nft_rules():
     if not tunnels:
         if os.path.exists(NFT_RULES_FILE): os.remove(NFT_RULES_FILE)
         run_command(['systemctl', 'reload', 'nftables']); return
-
-    # This logic will need to be much smarter when we have multiple clients
-    # For now, it assumes one client.
-    client_config_path = os.path.join(CHIMERA_CONFIG_DIR, 'client.json')
-    if not os.path.exists(client_config_path):
-        print(f"{C.RED}Client config not found. Cannot apply rules.{C.END}"); return
     
-    # This is a placeholder. In a real multi-client setup, we'd need to know
-    # which tunnel corresponds to which client IP.
-    # For now, we assume the client is the one that connected.
-    client_ip_in_tunnel = "10.0.0.2" # Placeholder
+    # This logic is a placeholder and will need to be made much smarter.
+    # It assumes a single client with a hardcoded tunnel IP.
+    client_ip_in_tunnel = "10.0.0.2" # This needs to be dynamic in a real multi-client setup.
 
     rules = [f"table inet {NFT_NAT_TABLE_NAME} {{", "\tchain prerouting { type nat hook prerouting priority dstnat; policy accept; }", "}"]
     for tunnel in tunnels.values():
