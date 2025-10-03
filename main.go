@@ -35,41 +35,38 @@ func runServer() {
 
 	buffer := make([]byte, 2048)
 
-	// --- Server Handshake Logic ---
 	fmt.Println("Waiting for a client handshake...")
 
-	// 1. Wait for the client's public key.
+	// 1. Wait for the client's public key bytes.
 	n, remoteAddr, err := conn.ReadFrom(buffer)
 	if err != nil {
 		log.Fatalf("Handshake read failed: %v", err)
 	}
-	if n != handshakeKeySize {
-		log.Fatalf("Invalid handshake from %s: incorrect key size", remoteAddr)
+	clientPubKey, err := curve.NewPublicKey(buffer[:n])
+	if err != nil {
+		log.Fatalf("Invalid public key from %s: %v", remoteAddr, err)
 	}
-	var clientPubKey [handshakeKeySize]byte
-	copy(clientPubKey[:], buffer[:n])
 	fmt.Printf("Received handshake from %s\n", remoteAddr)
 
 	// 2. Generate our own key pair.
-	serverPubKey, serverPrivKey, err := GenerateKeys()
+	serverPrivKey, err := GenerateKeys()
 	if err != nil {
 		log.Fatalf("Failed to generate server keys: %v", err)
 	}
 
-	// 3. Send our public key back to the client.
-	if _, err := conn.WriteTo(serverPubKey[:], remoteAddr); err != nil {
+	// 3. Send our public key bytes back to the client.
+	if _, err := conn.WriteTo(serverPrivKey.PublicKey().Bytes(), remoteAddr); err != nil {
 		log.Fatalf("Failed to send handshake reply: %v", err)
 	}
 	fmt.Println("Sent handshake reply.")
 
 	// 4. Calculate the shared secret session key.
-	sessionKey, err := CalculateSharedSecret(serverPrivKey, &clientPubKey)
+	sessionKey, err := CalculateSharedSecret(serverPrivKey, clientPubKey)
 	if err != nil {
 		log.Fatalf("Failed to calculate shared secret: %v", err)
 	}
 	fmt.Println("? Secure session established!")
 
-	// --- Listen for Encrypted Data ---
 	for {
 		n, _, err := conn.ReadFrom(buffer)
 		if err != nil {
@@ -94,41 +91,37 @@ func runClient(connectAddr string) {
 	}
 	defer conn.Close()
 
-	// --- Client Handshake Logic ---
 	// 1. Generate our key pair.
-	clientPubKey, clientPrivKey, err := GenerateKeys()
+	clientPrivKey, err := GenerateKeys()
 	if err != nil {
 		log.Fatalf("Failed to generate client keys: %v", err)
 	}
 
-	// 2. Send our public key to the server to initiate the handshake.
-	if _, err := conn.Write(clientPubKey[:]); err != nil {
+	// 2. Send our public key bytes to the server.
+	if _, err := conn.Write(clientPrivKey.PublicKey().Bytes()); err != nil {
 		log.Fatalf("Failed to send handshake: %v", err)
 	}
 	fmt.Println("Sent handshake, waiting for reply...")
 
-	// 3. Wait for the server's public key.
+	// 3. Wait for the server's public key bytes.
 	buffer := make([]byte, 2048)
-	// Set a deadline so we don't wait forever if the server is down.
 	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	n, err := conn.Read(buffer)
 	if err != nil {
 		log.Fatalf("Failed to receive handshake reply: %v", err)
 	}
-	if n != handshakeKeySize {
-		log.Fatalf("Invalid handshake reply: incorrect key size")
+	serverPubKey, err := curve.NewPublicKey(buffer[:n])
+	if err != nil {
+		log.Fatalf("Invalid public key from server: %v", err)
 	}
-	var serverPubKey [handshakeKeySize]byte
-	copy(serverPubKey[:], buffer[:n])
 
 	// 4. Calculate the shared secret session key.
-	sessionKey, err := CalculateSharedSecret(clientPrivKey, &serverPubKey)
+	sessionKey, err := CalculateSharedSecret(clientPrivKey, serverPubKey)
 	if err != nil {
 		log.Fatalf("Failed to calculate shared secret: %v", err)
 	}
 	fmt.Println("? Secure session established!")
 
-	// --- Send Encrypted Data ---
 	message := []byte("This message is protected by a dynamic session key!")
 	encrypted, err := Encrypt(sessionKey, message)
 	if err != nil {
