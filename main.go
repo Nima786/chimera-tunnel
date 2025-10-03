@@ -12,9 +12,7 @@ import (
 )
 
 // --- Configuration for Google Handshake (placeholders) ---
-// In the final version, the Python script will create a config.json file
-// with these values. For now, we keep them here for testing.
-const projectID = "chimera-handshake" // <-- REMEMBER TO REPLACE THIS
+const projectID = "YOUR_PROJECT_ID" // <-- REMEMBER TO REPLACE THIS
 const topicID = "chimera-rendezvous"
 
 func main() {
@@ -36,7 +34,6 @@ func main() {
 			var remoteAddrStr string
 			sessionKey, remoteAddrStr, err = performGoogleHandshakeServer(projectID, topicID)
 			if err == nil {
-				// After getting the string IP from the handshake, resolve it to a UDP address
 				remoteAddr, err = net.ResolveUDPAddr("udp", remoteAddrStr)
 			}
 		} else {
@@ -46,8 +43,8 @@ func main() {
 			log.Fatalf("Handshake failed: %v", err)
 		}
 		fmt.Println("? Handshake successful! Starting data transport listener...")
-		// After handshake, the server's job is to listen for data from the established client.
-		listenForData(sessionKey, remoteAddr)
+		// Pass the original listen address AND the expected client address
+		listenForData(sessionKey, *connectAddr, remoteAddr)
 
 	} else if *connectAddr != "" {
 		// CLIENT/CONNECT MODE
@@ -64,25 +61,26 @@ func main() {
 			log.Fatalf("Handshake failed: %v", err)
 		}
 		fmt.Println("? Handshake successful! Ready to send data.")
-		// After handshake, the client's job is to send data to the server.
-		// We will also listen for Ctrl+C to exit gracefully.
 		runClientDataLoop(sessionKey, remoteAddrStr)
 
 	} else {
 		fmt.Println("Usage: go run . -listen -connect <ip:port> OR go run . -connect <ip:port>")
 		flag.PrintDefaults()
 	}
-}
+} // <-- THIS BRACE WAS IN THE WRONG PLACE
 
 // listenForData is the server's main loop after a successful handshake.
-func listenForData(sessionKey *[KeySize]byte, listenAddr *net.UDPAddr) {
-	// The server listens on the same address it used for the static handshake.
-	conn, err := net.ListenUDP("udp", listenAddr)
+func listenForData(sessionKey *[KeySize]byte, listenAddrStr string, expectedRemoteAddr *net.UDPAddr) {
+	udpAddr, err := net.ResolveUDPAddr("udp", listenAddrStr)
+	if err != nil {
+		log.Fatalf("Invalid listen address for data: %v", err)
+	}
+	conn, err := net.ListenUDP("udp", udpAddr)
 	if err != nil {
 		log.Fatalf("Failed to start data listener: %v", err)
 	}
 	defer conn.Close()
-	fmt.Printf("Listening for data on %s\n", listenAddr.String())
+	fmt.Printf("Listening for data on %s\n", listenAddrStr)
 
 	buffer := make([]byte, 2048)
 	for {
@@ -91,11 +89,6 @@ func listenForData(sessionKey *[KeySize]byte, listenAddr *net.UDPAddr) {
 			log.Printf("Error reading data: %v", err)
 			continue
 		}
-
-		// Security check: Only accept data from the client we just handshaked with.
-		// Note: For the Google handshake, the remoteAddr will be different, so we can't
-		// rely on this check. In a real implementation, we'd add a signature.
-		// For now, we'll just decrypt.
 
 		decrypted, err := Decrypt(sessionKey, buffer[:n])
 		if err != nil {
@@ -114,11 +107,9 @@ func runClientDataLoop(sessionKey *[KeySize]byte, remoteAddrStr string) {
 	}
 	defer conn.Close()
 
-	// Set up a ticker to send a message every 2 seconds.
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
-	// Set up a channel to listen for Ctrl+C.
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
@@ -127,7 +118,6 @@ func runClientDataLoop(sessionKey *[KeySize]byte, remoteAddrStr string) {
 	for {
 		select {
 		case <-ticker.C:
-			// Every 2 seconds, send a new message.
 			message := []byte(fmt.Sprintf("The time is %s", time.Now().Format(time.RFC3339)))
 			encrypted, err := Encrypt(sessionKey, message)
 			if err != nil {
@@ -139,7 +129,6 @@ func runClientDataLoop(sessionKey *[KeySize]byte, remoteAddrStr string) {
 			}
 			fmt.Println("Sent encrypted message.")
 		case <-sigChan:
-			// Ctrl+C was pressed.
 			fmt.Println("\nSignal received, shutting down client.")
 			return
 		}
