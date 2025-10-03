@@ -19,10 +19,61 @@ class C:
 
 # --- Placeholder Functions (We will implement these one by one) ---
 def install():
-    print(f"{C.YELLOW}Install function not yet implemented.{C.END}")
-    # TODO: Download chimera binary from GitHub Releases
-    # TODO: Copy this manager script to INSTALL_PATH
-    # TODO: Install dependencies (nftables)
+    """
+    Installs the Chimera manager and the core binary.
+    """
+    print(f"{C.HEADER}--- Starting Chimera Installation ---{C.END}")
+
+    # --- 1. Define URLs and Paths ---
+    # IMPORTANT: Replace this with the real URL you copied from your GitHub Release!
+    BINARY_URL = "https://github.com/Nima786/chimera-tunnel/releases/download/v0.1.0/chimera"
+    
+    # We will use a temporary file for the download
+    temp_binary_path = "/tmp/chimera"
+
+    # --- 2. Check for root privileges ---
+    if os.geteuid() != 0:
+        sys.exit(f"{C.RED}Installation requires root privileges. Please run with sudo.{C.END}")
+
+    # --- 3. Install Dependencies ---
+    print(f"{C.CYAN}Checking and installing dependencies (nftables, curl)...{C.END}")
+    try:
+        subprocess.run(["sudo", "apt-get", "update"], check=True)
+        subprocess.run(["sudo", "apt-get", "install", "-y", "nftables", "curl"], check=True)
+        print(f"{C.GREEN}Dependencies are installed.{C.END}")
+    except subprocess.CalledProcessError:
+        sys.exit(f"{C.RED}Failed to install dependencies. Please install them manually and try again.{C.END}")
+
+    # --- 4. Download the Chimera Binary ---
+    print(f"{C.CYAN}Downloading the Chimera core binary from GitHub...{C.END}")
+    try:
+        # Use curl to download the file. The -L flag follows redirects.
+        subprocess.run(
+            ["curl", "-L", "-o", temp_binary_path, BINARY_URL],
+            check=True, capture_output=True
+        )
+        print(f"{C.GREEN}Download complete.{C.END}")
+    except subprocess.CalledProcessError as e:
+        sys.exit(f"{C.RED}Failed to download the Chimera binary. Error: {e.stderr.decode()}{C.END}")
+
+    # --- 5. Install the Binary and Manager Script ---
+    print(f"{C.CYAN}Installing Chimera to /usr/local/bin/...{C.END}")
+    try:
+        # Make the downloaded binary executable
+        os.chmod(temp_binary_path, 0o755)
+        # Move it to the system path
+        shutil.move(temp_binary_path, CHIMERA_BINARY_PATH)
+
+        # Copy the manager script itself to the system path
+        shutil.copy2(sys.argv[0], INSTALL_PATH)
+        os.chmod(INSTALL_PATH, 0o755)
+        
+        print(f"{C.GREEN}Installation successful!{C.END}")
+    except Exception as e:
+        sys.exit(f"{C.RED}An error occurred during installation: {e}{C.END}")
+
+    print(f"\n{C.BOLD}You can now run the manager from anywhere with the command:{C.END}")
+    print(f"{C.GREEN}sudo chimera-manager{C.END}")
 
 def setup_relay_server():
     print(f"{C.YELLOW}Setup Relay Server function not yet implemented.{C.END}")
