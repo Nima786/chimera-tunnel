@@ -19,9 +19,9 @@ func main() {
 	// For this milestone, we will use a simple, hard-coded key.
 	// In the next milestone, we will generate this dynamically.
 	// IMPORTANT: This is just a placeholder key for testing!
-	var key [keySize]byte
+	var key [KeySize]byte
 	// We fill the key with a placeholder value. A real key would be random.
-	for i := 0; i < keySize; i++ {
+	for i := 0; i < KeySize; i++ {
 		key[i] = byte(i)
 	}
 
@@ -40,7 +40,7 @@ func main() {
 }
 
 // runServer contains the logic for the listener.
-func runServer(key *[keySize]byte) {
+func runServer(key *[KeySize]byte) {
 	addr := "127.0.0.1:8080"
 	fmt.Printf("🚀 Starting Chimera server and listening on %s...\n", addr)
 
@@ -76,7 +76,7 @@ func runServer(key *[keySize]byte) {
 }
 
 // runClient contains the logic for the initiator.
-func runClient(key *[keySize]byte, connectAddr string) {
+func runClient(key *[KeySize]byte, connectAddr string) {
 	fmt.Printf("🚀 Starting Chimera client, connecting to %s...\n", connectAddr)
 
 	// Dial the server. This doesn't create a persistent connection for UDP,
