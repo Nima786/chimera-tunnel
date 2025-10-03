@@ -8,7 +8,7 @@ import time
 import re
 
 # --- Configuration ---
-SCRIPT_VERSION = "v1.3-manager" # <-- Final, Robust Version
+SCRIPT_VERSION = "v1.4-final"
 INSTALL_PATH = '/usr/local/bin/chimera-manager'
 CHIMERA_BINARY_PATH = '/usr/local/bin/chimera'
 CHIMERA_CONFIG_DIR = '/etc/chimera'
@@ -17,7 +17,7 @@ NFT_RULES_FILE = '/etc/nftables.d/chimera-nat.nft'
 NFT_NAT_TABLE_NAME = 'chimera_nat'
 MAIN_NFT_CONFIG = '/etc/nftables.conf'
 SCRIPT_URL = "https://raw.githubusercontent.com/Nima786/chimera-tunnel/main/chimera-manager.py"
-BINARY_URL = "https://github.com/Nima786/chimera-tunnel/releases/download/v0.2.0/chimera"
+RELEASE_BASE_URL = "https://github.com/Nima786/chimera-tunnel/releases/download/v0.3.0"
 
 # --- Color Codes ---
 class C:
@@ -77,26 +77,20 @@ def parse_and_check_ports(ports_str):
 # --- Core Functions ---
 def install():
     print(f"{C.HEADER}--- Starting Chimera Installation ---{C.END}")
-    temp_binary_path = "/tmp/chimera"; temp_script_path = "/tmp/chimera-manager.py"
+    temp_script_path = "/tmp/chimera-manager.py"
     if os.geteuid() != 0: sys.exit(f"{C.RED}Installation requires root privileges.{C.END}")
-    print(f"{C.CYAN}Installing dependencies (nftables, curl)...{C.END}")
+    print(f"{C.CYAN}Installing dependencies (curl)...{C.END}")
     try:
         subprocess.run(["sudo", "apt-get", "update"], check=True, capture_output=True)
-        subprocess.run(["sudo", "apt-get", "install", "-y", "nftables", "curl"], check=True, capture_output=True)
+        subprocess.run(["sudo", "apt-get", "install", "-y", "curl"], check=True, capture_output=True)
         print(f"{C.GREEN}Dependencies are installed.{C.END}")
     except subprocess.CalledProcessError: sys.exit(f"{C.RED}Failed to install dependencies.{C.END}")
-    print(f"{C.CYAN}Downloading Chimera core binary...{C.END}")
-    try:
-        subprocess.run(["curl", "-L", "-o", temp_binary_path, BINARY_URL], check=True, capture_output=True)
-        print(f"{C.GREEN}Download complete.{C.END}")
-    except subprocess.CalledProcessError as e: sys.exit(f"{C.RED}Failed to download binary. Error: {e.stderr.decode()}{C.END}")
     print(f"{C.CYAN}Downloading the manager script...{C.END}")
     try:
         subprocess.run(["curl", "-L", "-o", temp_script_path, SCRIPT_URL], check=True, capture_output=True)
     except subprocess.CalledProcessError as e: sys.exit(f"{C.RED}Failed to download manager script. Error: {e.stderr.decode()}{C.END}")
     print(f"{C.CYAN}Installing to /usr/local/bin/...{C.END}")
     try:
-        os.chmod(temp_binary_path, 0o755); shutil.move(temp_binary_path, CHIMERA_BINARY_PATH)
         shutil.copy2(temp_script_path, INSTALL_PATH); os.chmod(INSTALL_PATH, 0o755); os.remove(temp_script_path)
         print(f"{C.GREEN}Installation successful!{C.END}")
     except Exception as e: sys.exit(f"{C.RED}An error occurred during installation: {e}{C.END}")
@@ -107,6 +101,20 @@ def setup_relay_server():
     config_path = os.path.join(CHIMERA_CONFIG_DIR, 'server.json')
     if os.path.exists(config_path):
         if input(f"{C.YELLOW}A relay configuration already exists. Overwrite? (y/N): {C.END}").lower().strip() != 'y': return
+    if not os.path.exists(CHIMERA_BINARY_PATH):
+        print(f"{C.YELLOW}Chimera core binary not found. Downloading it now...{C.END}")
+        arch_proc = run_command(['uname', '-m'], use_sudo=False)
+        arch = arch_proc.stdout.strip()
+        binary_name = ""
+        if arch == "x86_64": binary_name = "chimera-amd64"
+        elif arch == "aarch64": binary_name = "chimera-arm64"
+        else: print(f"{C.RED}Unsupported architecture for relay: {arch}{C.END}"); return
+        binary_url = f"{RELEASE_BASE_URL}/{binary_name}"
+        try:
+            subprocess.run(["curl", "-L", "-o", CHIMERA_BINARY_PATH, binary_url], check=True)
+            os.chmod(CHIMERA_BINARY_PATH, 0o755)
+        except Exception:
+            print(f"{C.RED}Failed to download the Chimera binary for this relay.{C.END}"); return
     print("Select the handshake method this relay will use:")
     print(f"  {C.CYAN}1. Static{C.END} (Simple, requires a public port for handshake)")
     choice = input("Enter choice: ").strip()
@@ -126,48 +134,51 @@ def setup_relay_server():
 def generate_client_config():
     clear_screen(); print(f"{C.HEADER}--- Generate a Client Configuration ---{C.END}")
     print("This will generate a one-line command to set up a client that connects to THIS relay.")
-    
     relay_ip = input("Enter the public IP address of THIS relay server: ").strip()
     relay_port = input("Enter the public port of THIS relay server (e.g., 8080): ").strip()
-    
     config = { "handshake_method": "static", "connect_address": f"{relay_ip}:{relay_port}" }
     config_str_escaped = json.dumps(config).replace('"', '\\"')
     client_config_path = os.path.join(CHIMERA_CONFIG_DIR, 'client.json')
-    
     script_content = f"""#!/bin/bash
 set -e
+echo '[INFO] Detecting architecture...'
+ARCH=$(uname -m)
+BINARY_NAME=""
+if [ "$ARCH" = "x86_64" ]; then
+    BINARY_NAME="chimera-amd64"
+elif [ "$ARCH" = "aarch64" ]; then
+    BINARY_NAME="chimera-arm64"
+else
+    echo "[ERROR] Unsupported architecture: $ARCH"
+    exit 1
+fi
+echo "[INFO] Detected $ARCH. Using binary: $BINARY_NAME"
+BINARY_URL="{RELEASE_BASE_URL}/$BINARY_NAME"
 echo '[INFO] Installing Chimera...'
-curl -L -o {CHIMERA_BINARY_PATH} "{BINARY_URL}"
+curl -L -o {CHIMERA_BINARY_PATH} "$BINARY_URL"
 chmod +x {CHIMERA_BINARY_PATH}
-
 echo '[INFO] Creating configuration...'
 mkdir -p {CHIMERA_CONFIG_DIR}
 echo '{config_str_escaped}' > {client_config_path}
-
 echo '[INFO] Creating systemd service...'
 cat <<EOF > /etc/systemd/system/chimera-client.service
 [Unit]
 Description=Chimera Client Tunnel
 After=network.target
-
 [Service]
 ExecStart={CHIMERA_BINARY_PATH} -config {client_config_path}
 Restart=always
 User=root
-
 [Install]
 WantedBy=multi-user.target
 EOF
-
 echo '[INFO] Starting service...'
 systemctl daemon-reload
 systemctl enable chimera-client.service
 systemctl restart chimera-client.service
 echo '[SUCCESS] Chimera client setup is complete\\!'
 """
-    
     one_line_command = f"sudo bash -c '{script_content.strip()}'"
-    
     clear_screen()
     print(f"{C.BOLD}{C.YELLOW}--- ACTION REQUIRED on the Client Server ---{C.END}")
     print("Run the following single command on the client server to install and start the tunnel:")
@@ -191,14 +202,11 @@ def manage_forwarding_rules():
 def add_forwarding_rule():
     print(f"\n{C.BOLD}--- Add New Forwarding Rule ---{C.END}")
     ports_str = input(f"Enter public port(s) to open on this server (e.g., 80, 443, 3000-4000): ").strip()
-    
     formatted_ports, err = parse_and_check_ports(ports_str)
     if err:
         print(f"{C.RED}Error: {err}{C.END}"); return
-        
     dest_ip = input(f"Enter the final destination IP on the client server (e.g., 127.0.0.1): ").strip() or "127.0.0.1"
     dest_port = input(f"Enter the final destination port on the client server (e.g., 80): ").strip()
-
     name = formatted_ports
     tunnels = load_tunnels()
     tunnels[name] = {'public_ports': formatted_ports, 'dest_ip': dest_ip, 'dest_port': dest_port}
