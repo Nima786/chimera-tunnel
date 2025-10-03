@@ -163,7 +163,11 @@ echo '[INFO] Starting service...'
 systemctl daemon-reload
 systemctl enable chimera-client.service
 systemctl restart chimera-client.service
+<<<<<<< HEAD
 echo '[SUCCESS] Chimera client setup is complete\\!'
+=======
+echo '[SUCCESS] Chimera client setup is complete!'
+>>>>>>> 5e6def13bc40fb548047975e7fb7c32c4e1a0f72
 """
     
     one_line_command = f"sudo bash -c '{script_content.strip()}'"
