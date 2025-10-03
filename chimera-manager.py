@@ -8,7 +8,7 @@ import time
 import re
 
 # --- Configuration ---
-SCRIPT_VERSION = "v1.3-manager"
+SCRIPT_VERSION = "v1.3-manager" # <-- Final, Robust Version
 INSTALL_PATH = '/usr/local/bin/chimera-manager'
 CHIMERA_BINARY_PATH = '/usr/local/bin/chimera'
 CHIMERA_CONFIG_DIR = '/etc/chimera'
@@ -17,7 +17,6 @@ NFT_RULES_FILE = '/etc/nftables.d/chimera-nat.nft'
 NFT_NAT_TABLE_NAME = 'chimera_nat'
 MAIN_NFT_CONFIG = '/etc/nftables.conf'
 SCRIPT_URL = "https://raw.githubusercontent.com/Nima786/chimera-tunnel/main/chimera-manager.py"
-# --- UPDATED: Point to the new v0.2.0 release ---
 BINARY_URL = "https://github.com/Nima786/chimera-tunnel/releases/download/v0.2.0/chimera"
 
 # --- Color Codes ---
@@ -108,32 +107,16 @@ def setup_relay_server():
     config_path = os.path.join(CHIMERA_CONFIG_DIR, 'server.json')
     if os.path.exists(config_path):
         if input(f"{C.YELLOW}A relay configuration already exists. Overwrite? (y/N): {C.END}").lower().strip() != 'y': return
-    
     print("Select the handshake method this relay will use:")
     print(f"  {C.CYAN}1. Static{C.END} (Simple, requires a public port for handshake)")
     choice = input("Enter choice: ").strip()
-
     if choice == '1':
         listen_ip = input("Enter the IP address for the relay to listen on (e.g., 0.0.0.0 for all): ").strip() or "0.0.0.0"
         listen_port = input("Enter the port for the relay to listen on (e.g., 8080): ").strip()
         config = { "handshake_method": "static", "listen_address": f"{listen_ip}:{listen_port}" }
-        
         os.makedirs(CHIMERA_CONFIG_DIR, exist_ok=True)
         with open(config_path, 'w') as f: json.dump(config, f, indent=4)
-            
-        service_content = f"""
-[Unit]
-Description=Chimera Relay Server
-After=network.target
-
-[Service]
-ExecStart={CHIMERA_BINARY_PATH} -config {config_path}
-Restart=always
-User=root
-
-[Install]
-WantedBy=multi-user.target
-"""
+        service_content = f"[Unit]\nDescription=Chimera Relay Server\nAfter=network.target\n\n[Service]\nExecStart={CHIMERA_BINARY_PATH} -config {config_path}\nRestart=always\nUser=root\n\n[Install]\nWantedBy=multi-user.target"
         with open('/etc/systemd/system/chimera-relay.service', 'w') as f: f.write(service_content)
         run_command(['systemctl', 'daemon-reload']); run_command(['systemctl', 'enable', 'chimera-relay.service']); run_command(['systemctl', 'restart', 'chimera-relay.service'])
         print(f"{C.GREEN}Relay server configured and started successfully!{C.END}")
@@ -148,18 +131,18 @@ def generate_client_config():
     relay_port = input("Enter the public port of THIS relay server (e.g., 8080): ").strip()
     
     config = { "handshake_method": "static", "connect_address": f"{relay_ip}:{relay_port}" }
-    config_str = json.dumps(config)
+    config_str_escaped = json.dumps(config).replace('"', '\\"')
     client_config_path = os.path.join(CHIMERA_CONFIG_DIR, 'client.json')
     
-    setup_command = f"""
-bash -c "
+    script_content = f"""#!/bin/bash
+set -e
 echo '[INFO] Installing Chimera...'
-curl -L -o {CHIMERA_BINARY_PATH} {BINARY_URL}
+curl -L -o {CHIMERA_BINARY_PATH} "{BINARY_URL}"
 chmod +x {CHIMERA_BINARY_PATH}
 
 echo '[INFO] Creating configuration...'
 mkdir -p {CHIMERA_CONFIG_DIR}
-echo '{config_str}' > {client_config_path}
+echo '{config_str_escaped}' > {client_config_path}
 
 echo '[INFO] Creating systemd service...'
 cat <<EOF > /etc/systemd/system/chimera-client.service
@@ -181,12 +164,14 @@ systemctl daemon-reload
 systemctl enable chimera-client.service
 systemctl restart chimera-client.service
 echo '[SUCCESS] Chimera client setup is complete!'
-"
 """
+    
+    one_line_command = f"sudo bash -c '{script_content.strip()}'"
+    
     clear_screen()
     print(f"{C.BOLD}{C.YELLOW}--- ACTION REQUIRED on the Client Server ---{C.END}")
     print("Run the following single command on the client server to install and start the tunnel:")
-    print(f"\n{C.CYAN}{setup_command.strip()}{C.END}\n")
+    print(f"\n{C.CYAN}{one_line_command}{C.END}\n")
 
 def manage_forwarding_rules():
     while True:
@@ -214,7 +199,7 @@ def add_forwarding_rule():
     dest_ip = input(f"Enter the final destination IP on the client server (e.g., 127.0.0.1): ").strip() or "127.0.0.1"
     dest_port = input(f"Enter the final destination port on the client server (e.g., 80): ").strip()
 
-    name = formatted_ports # Use the port string as a unique key
+    name = formatted_ports
     tunnels = load_tunnels()
     tunnels[name] = {'public_ports': formatted_ports, 'dest_ip': dest_ip, 'dest_port': dest_port}
     save_tunnels(tunnels)
@@ -259,9 +244,8 @@ def generate_and_apply_nft_rules():
         if os.path.exists(NFT_RULES_FILE): os.remove(NFT_RULES_FILE)
         run_command(['systemctl', 'reload', 'nftables']); return
     
-    # This logic is a placeholder and will need to be made much smarter.
-    # It assumes a single client with a hardcoded tunnel IP.
-    client_ip_in_tunnel = "10.0.0.2" # This needs to be dynamic in a real multi-client setup.
+    # This logic is a placeholder and will be improved.
+    client_ip_in_tunnel = "10.0.0.2" # Placeholder
 
     rules = [f"table inet {NFT_NAT_TABLE_NAME} {{", "\tchain prerouting { type nat hook prerouting priority dstnat; policy accept; }", "}"]
     for tunnel in tunnels.values():
@@ -315,6 +299,6 @@ def main():
 
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[0] == '-c': main()
-    elif os.path.basename(sys.argv[0]) == os.path.basename(INSTALL_PATH):
+    elif os.path.exists(INSTALL_PATH) and os.path.basename(sys.argv[0]) == os.path.basename(INSTALL_PATH):
         sys.argv.append('--installed'); main()
     else: main()
