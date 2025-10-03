@@ -1,0 +1,46 @@
+# This is the name of the workflow as it will appear in the "Actions" tab on GitHub.
+name: Go Build and Test
+
+# This section defines when the workflow should run.
+on:
+  # Run it on every push to the "main" branch.
+  push:
+    branches: [ "main" ]
+  # Run it on every pull request that targets the "main" branch.
+  pull_request:
+    branches: [ "main" ]
+
+# This section defines the jobs to be run. We only have one job for now.
+jobs:
+  # The name of our job. You can call it anything.
+  build:
+    # This specifies the type of machine to run the job on.
+    # "ubuntu-latest" is a standard, clean Linux environment provided by GitHub.
+    runs-on: ubuntu-latest
+
+    # This section lists the steps the job will perform in order.
+    steps:
+    # Step 1: Check out your code
+    # This is a pre-made action that downloads your repository's code onto the runner machine.
+    - uses: actions/checkout@v4
+
+    # Step 2: Set up the Go environment
+    # This action installs the specific version of Go that we want to use.
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21' # We can update this version later if needed.
+
+    # Step 3: Build the program
+    # This command tries to compile your Go code. If there are any syntax errors
+    # or other compilation problems, this step will fail, and the whole workflow will fail.
+    # The "-v" flag means "verbose," so it will print the names of the packages it builds.
+    - name: Build
+      run: go build -v ./...
+
+    # Step 4: Run tests
+    # This command looks for any test files (files ending in "_test.go") in your project
+    # and runs them. If any test fails, this step will fail.
+    # The "-v" flag means "verbose," so it will print the results of each test.
+    - name: Test
+      run: go test -v ./...
