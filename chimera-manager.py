@@ -27,11 +27,19 @@ class C:
 # --- Helper Functions (unchanged) ---
 def clear_screen(): os.system('clear')
 def press_enter_to_continue(): input(f"\n{C.YELLOW}Press Enter to return to the menu...{C.END}")
-def run_command(command, use_sudo=True, capture=True, text=True):
-    if use_sudo and os.geteuid() != 0: command = ['sudo'] + command
+def run_command(command, use_sudo=True, capture=True, text=True, shell=False):
+    if use_sudo and os.geteuid() != 0:
+        if shell:
+            # If shell=True, the command is a string, so prepend 'sudo '
+            command = 'sudo ' + command
+        else:
+            # Otherwise, it's a list
+            command = ['sudo'] + command
     try:
-        return subprocess.run(command, check=True, capture_output=capture, text=text)
-    except subprocess.CalledProcessError: return None
+        # Pass the shell argument to the underlying subprocess call
+        return subprocess.run(command, check=True, capture_output=capture, text=text, shell=shell)
+    except subprocess.CalledProcessError:
+        return None
 def check_and_fix_nftables_config():
     include_line = f'include "/etc/nftables.d/*.nft"'
     if not os.path.exists(MAIN_NFT_CONFIG):
