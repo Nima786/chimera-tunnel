@@ -8,11 +8,15 @@ import time
 import re
 
 # --- Configuration ---
+<<<<<<< Updated upstream
 <<<<<<< HEAD
 SCRIPT_VERSION = "v1.4-final"
 =======
 SCRIPT_VERSION = "v1.5-final"
 >>>>>>> 41e9315797a4817a5b8fc7fbcdfec4280f1e62ad
+=======
+SCRIPT_VERSION = "v1.5-final"
+>>>>>>> Stashed changes
 INSTALL_PATH = '/usr/local/bin/chimera-manager'
 CHIMERA_BINARY_PATH = '/usr/local/bin/chimera'
 CHIMERA_CONFIG_DIR = '/etc/chimera'
@@ -140,6 +144,7 @@ def generate_client_config():
     print("This will generate a one-line command to set up a client that connects to THIS relay.")
     relay_ip = input("Enter the public IP address of THIS relay server: ").strip()
     relay_port = input("Enter the public port of THIS relay server (e.g., 8080): ").strip()
+<<<<<<< Updated upstream
 <<<<<<< HEAD
     config = { "handshake_method": "static", "connect_address": f"{relay_ip}:{relay_port}" }
     config_str_escaped = json.dumps(config).replace('"', '\\"')
@@ -185,6 +190,8 @@ echo '[SUCCESS] Chimera client setup is complete\\!'
 """
     one_line_command = f"sudo bash -c '{script_content.strip()}'"
 =======
+=======
+>>>>>>> Stashed changes
     
     config_json = json.dumps({
         "handshake_method": "static",
@@ -196,7 +203,10 @@ echo '[SUCCESS] Chimera client setup is complete\\!'
     # The new, simple, and robust one-line command
     one_line_command = f"curl -fsSL \"{installer_url}\" | sudo bash -s -- '{config_json}'"
     
+<<<<<<< Updated upstream
 >>>>>>> 41e9315797a4817a5b8fc7fbcdfec4280f1e62ad
+=======
+>>>>>>> Stashed changes
     clear_screen()
     print(f"{C.BOLD}{C.YELLOW}--- ACTION REQUIRED on the Client Server ---{C.END}")
     print("Run the following single, reliable command on the client server:")
