@@ -1,12 +1,10 @@
 package main
 
 import (
-	"fmt"
 	"io"
 	"log"
 	"net"
 	"sync"
-	"time"
 )
 
 // Relay manages TCP -> UDP forwarding
